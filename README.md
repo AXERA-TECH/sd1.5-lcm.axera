@@ -26,23 +26,28 @@ Self-portrait oil painting, a beautiful cyborg with golden hair, 8k
 
 **Output**
 ```
-root@ax650:/mnt/qtang/sd15# python3 main.py --unet_model ./models/unet.axmodel ./models/vae.axmodel --time_input ./models/time_input.npy
+root@ax650:~/samples/sd1.5-lcm.axera# python3 main.py
 prompt: Self-portrait oil painting, a beautiful cyborg with golden hair, 8k
+text_tokenizer: ./models/tokenizer
+text_encoder: ./models/text_encoder
 unet_model: ./models/unet.axmodel
 vae_model: ./models/vae.axmodel
 time_input: ./models/time_input.npy
 save_dir: ./lcm_lora_sdv1_5_axmodel.png
-text encoder take 1542.6530838012695ms
-unet once take 434.3595504760742ms
-unet once take 433.8352680206299ms
-unet once take 433.6984157562256ms
-unet once take 433.8405132293701ms
-unet loop take 1742.6340579986572ms
-vae inference take 935.497522354126ms
-save image take 1345.1480865478516ms
+text encoder take 1659.5592498779297ms
+load models take 1725.5077362060547ms
+unet once take 434.7350597381592ms
+unet once take 434.8788261413574ms
+unet once take 434.51476097106934ms
+unet once take 434.57746505737305ms
+unet loop take 1745.5813884735107ms
+vae inference take 924.3650436401367ms
+save image take 1342.8122997283936ms
+root@ax650:~/samples/sd1.5-lcm.axera#
 ```
 
 **Output Image**
+
 ![](./lcm_lora_sdv1_5_axmodel.png)
 
 ## 相关项目
