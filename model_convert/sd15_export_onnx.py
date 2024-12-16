@@ -4,6 +4,7 @@ import numpy as np
 import onnx
 import onnxsim
 import torch
+import os
 from diffusers import LCMScheduler, AutoPipelineForText2Image, AutoencoderKL
 
 """
@@ -154,6 +155,8 @@ if __name__ == "__main__":
     parser.add_argument("--output_path", help="output path", required=True)
 
     args = parser.parse_args()
+
+    os.makedirs(args.output_path, exist_ok=True)
 
     extract_unet(args.input_path, args.input_lora_path, args.output_path)
     extract_vae(args.input_path, args.output_path)
