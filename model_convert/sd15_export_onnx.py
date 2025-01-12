@@ -115,13 +115,15 @@ def extract_unet(input_path, input_lora_path, output_path):
 
 
 def extract_vae(input_path, output_path):
+
     vae = AutoencoderKL.from_pretrained(
         str(pathlib.Path(input_path) / "vae"), torch_dtype=torch.float32, variant="fp16"
     )
-    dummy_input = torch.rand([1, 4, 64, 64], dtype=torch.float32)
     vae.eval()
 
-    class VAEWrapper(torch.nn.Module):
+    # 导出 VAE 的 Decoder 部分
+    dummy_input = torch.rand([1, 4, 64, 64], dtype=torch.float32)
+    class VAEDecoderWrapper(torch.nn.Module):
         def __init__(self, conv_quant, decoder):
             super().__init__()
             self.conv_quant = conv_quant
@@ -132,18 +134,45 @@ def extract_vae(input_path, output_path):
             decoder = self.decoder(sample)
             return decoder
 
-    vaewrapper = VAEWrapper(vae.post_quant_conv, vae.decoder)
+    vae_decoder_wrapper = VAEDecoderWrapper(vae.post_quant_conv, vae.decoder)
     torch.onnx.export(
-        vaewrapper,
+        vae_decoder_wrapper,
         dummy_input,
         str(pathlib.Path(output_path) / "sd15_vae_decoder.onnx"),
         opset_version=17,
         verbose=False,
         input_names=["x"],
     )
-    vae = onnx.load(str(pathlib.Path(output_path) / "sd15_vae_decoder.onnx"))
-    vae_sim, _ = onnxsim.simplify(vae)
-    onnx.save(vae_sim, str(pathlib.Path(output_path) / "sd15_vae_decoder_sim.onnx"))
+    vae_decoder_onnx = onnx.load(str(pathlib.Path(output_path) / "sd15_vae_decoder.onnx"))
+    vae_decoder_onnx_sim, _ = onnxsim.simplify(vae_decoder_onnx)
+    onnx.save(vae_decoder_onnx_sim, str(pathlib.Path(output_path) / "sd15_vae_decoder_sim.onnx"))
+
+    # 导出 VAE 的 Encoder 部分
+    dummy_input = torch.rand([1, 3, 512, 512], dtype=torch.float32)
+    class VAEEncoderWrapper(torch.nn.Module):
+        def __init__(self, encoder, pre_quant_conv):
+            super().__init__()
+            self.encoder = encoder
+            self.pre_quant_conv = pre_quant_conv
+
+        def forward(self, sample=None):
+            sample = self.encoder(sample)
+            latent_sample = self.pre_quant_conv(sample)
+            return latent_sample
+
+    vae_encoder_wrapper = VAEEncoderWrapper(vae.encoder, vae.quant_conv)
+    torch.onnx.export(
+        vae_encoder_wrapper,
+        dummy_input,
+        str(pathlib.Path(output_path) / "sd15_vae_encoder.onnx"),
+        opset_version=17,
+        verbose=False,
+        input_names=["image_sample"],
+        output_names=["latent_sample"],
+    )
+    vae_encoder_onnx = onnx.load(str(pathlib.Path(output_path) / "sd15_vae_encoder.onnx"))
+    vae_encoder_onnx_sim, _ = onnxsim.simplify(vae_encoder_onnx)
+    onnx.save(vae_encoder_onnx_sim, str(pathlib.Path(output_path) / "sd15_vae_encoder_sim.onnx"))
 
 
 if __name__ == "__main__":
@@ -158,6 +187,6 @@ if __name__ == "__main__":
 
     os.makedirs(args.output_path, exist_ok=True)
 
-    extract_unet(args.input_path, args.input_lora_path, args.output_path)
+    # extract_unet(args.input_path, args.input_lora_path, args.output_path)
     extract_vae(args.input_path, args.output_path)
     
