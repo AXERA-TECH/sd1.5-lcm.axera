@@ -103,7 +103,8 @@ def extract_unet(input_path, input_lora_path, output_path):
         precompute time embedding
     """
     time_input = np.zeros([4, 1280], dtype=np.float32)
-    timesteps = np.array([999, 759, 499, 259]).astype(np.int64)
+    # timesteps = np.array([999, 759, 499, 259]).astype(np.int64) # for text2img
+    timesteps = np.array([499, 259]).astype(np.int64) # for img2img
     for i, t in enumerate(timesteps):
         tt = torch.from_numpy(np.array([t])).to(torch.float32)
         sample = pipe.unet.time_proj(tt)
@@ -187,6 +188,6 @@ if __name__ == "__main__":
 
     os.makedirs(args.output_path, exist_ok=True)
 
-    # extract_unet(args.input_path, args.input_lora_path, args.output_path)
+    extract_unet(args.input_path, args.input_lora_path, args.output_path)
     extract_vae(args.input_path, args.output_path)
     

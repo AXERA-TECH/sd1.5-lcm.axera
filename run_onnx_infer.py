@@ -468,34 +468,36 @@ if __name__ == '__main__':
     print(f"time_input: {time_input}")
     print(f"save_dir: {save_dir}")
 
-    timesteps = np.array([999, 759, 499, 259]).astype(np.int64)
-    
+    # timesteps = np.array([999, 759, 499, 259]).astype(np.int64)
+
     # text encoder
     start = time.time()    
     # prompt = "Self-portrait oil painting, a beautiful cyborg with golden hair, 8k"
     prompt = "Astronauts in a jungle, cold color palette, muted colors, detailed, 8k"
+    # prompt = "Caricature, a beautiful girl with black hair, 8k"
     prompt_embeds_npy = get_embeds(prompt, tokenizer_dir, text_encoder_dir)
     print(f"text encoder take {1000 * (time.time() - start)}ms")
-    
+
     prompt_name = prompt.replace(" ", "_")
     latents_shape = [1, 4, 64, 64]
-    latent = torch.randn(latents_shape, generator=None, device="cpu", dtype=torch.float32,
-                         layout=torch.strided).detach().numpy()
-    
+    # latent = torch.randn(latents_shape, generator=None, device="cpu", dtype=torch.float32,
+    #                      layout=torch.strided).detach().numpy()
+
     alphas_cumprod, final_alphas_cumprod, self_timesteps = get_alphas_cumprod()
-    
+
     # load unet model and vae model
     start = time.time()
+    vae_encoder = onnxruntime.InferenceSession(vae_encoder_model)
     unet_session_main = onnxruntime.InferenceSession(unet_model)
     vae_decoder = onnxruntime.InferenceSession(vae_decoder_model)
-    vae_encoder = onnxruntime.InferenceSession(vae_encoder_model)
     print(f"load models take {1000 * (time.time() - start)}ms")
-    
+
     # load time input file
     time_input = np.load(time_input)
 
     # load image
     url = "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/diffusers/img2img-init.png"
+    # url = "/data/tmp/yongqiang/LLM/sd1.5-lcm.axera/image.png"
     init_image = load_image(url) # U8, (512, 512, 3), RGB
     init_image_show = init_image
     
@@ -512,51 +514,69 @@ if __name__ == '__main__':
 
     vae_encoder_onnx_inp_name = vae_encoder.get_inputs()[0].name
     vae_encoder_onnx_out_name = vae_encoder.get_outputs()[0].name
-    # vae_encoder_out 目前输出 size 是 (1, 8, 64, 64), 需要 debug
+    # vae_encoder_out.shape (1, 8, 64, 64), 数值基本对的上 (onnx fp32, torch fp16, 精度上会有点区别)
     # /home/baiyongqiang/miniforge-pypy3/envs/hf/lib/python3.9/site-packages/diffusers/models/autoencoders/autoencoder_kl.py#256
     vae_encoder_out = vae_encoder.run([vae_encoder_onnx_out_name], {vae_encoder_onnx_inp_name: init_image})[0] # encoder 输出: torch.Size([1, 8, 64, 64]), 最终结果 Size([1, 4, 64, 64])
-    print(f"vae inference take {1000 * (time.time() - vae_start)}ms")
+    print(f"vae encoder inference take {1000 * (time.time() - vae_start)}ms")
 
     # vae_encoder 处理
     device = torch.device("cuda:0")
-    dtype = torch.float32
     vae_encoder_out = torch.from_numpy(vae_encoder_out).to(torch.float32)
-    posterior = DiagonalGaussianDistribution(vae_encoder_out)
+    posterior = DiagonalGaussianDistribution(vae_encoder_out) # 数值基本对的上
     vae_encode_info = AutoencoderKLOutput(latent_dist=posterior)
     generator = torch.manual_seed(0)
-    init_latents = retrieve_latents(vae_encode_info, generator=generator)
-    init_latents = init_latents * 0.18215
+    init_latents = retrieve_latents(vae_encode_info, generator=generator) # 数值基本对的上
+    init_latents = init_latents * 0.18215 # 数值基本对的上
     init_latents = torch.cat([init_latents], dim=0)
     shape = init_latents.shape
-    noise = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
+    dtype = torch.float16
+    noise = randn_tensor(shape, generator=generator, device=device, dtype=dtype) # dtype 不同, 随机值不同
     # get latents
     timestep = torch.tensor([499]).to(device)
     init_latents = add_noise(init_latents.to(device), noise, timestep)
     latents = init_latents
 
     latents = latents.detach().cpu().numpy()
+    latent = latents # TODO: vae.encoder 结果基本对的上, 但是图生图的结果依然有问题, 怀疑 unet 和 decoder 还存在问题
 
     # unet inference loop
-    unet_loop_start = time.time()    
+    unet_loop_start = time.time()
+    timesteps = np.array([499, 259]).astype(np.int64)
+    self_timesteps = np.array([999, 759, 499, 259]).astype(np.int64)
+    step_index = [2, 3]
     for i, timestep in enumerate(timesteps):
         # print(i, timestep)
         
         unet_start = time.time()
+        # TODO: Unet 输出结果和 pytorch 对齐, 这里使用的 onnx 没有预计算 t 值
         noise_pred = unet_session_main.run([unet_session_main.get_outputs()[0].name], {"sample": latent, \
                                             "/down_blocks.0/resnets.0/act_1/Mul_output_0": np.expand_dims(time_input[i], axis=0), \
                                             "encoder_hidden_states": prompt_embeds_npy})[0] # ['5771']
+        # noise_pred = unet_session_main.run([unet_session_main.get_outputs()[0].name], {"sample": latent, \
+        #                                     "t": np.array(timestep), \
+        #                                     "encoder_hidden_states": prompt_embeds_npy})[0] # ['5771']
+        print(f"latent_model_input is {latent[0, 2, 10:20, 10]}")
+        print(f">>>>> noise_pred: {noise_pred[0, 2, 10:20, 10]}")
         print(f"unet once take {1000 * (time.time() - unet_start)}ms")
+        print("比较 unet 输出结果")
 
         sample = latent
         model_output = noise_pred
-        if i < 3:
-            prev_timestep = timesteps[i + 1]
+
+        # 1. get previous step value
+        prev_step_index = step_index[i] + 1
+        if prev_step_index < len(self_timesteps):
+            prev_timestep = self_timesteps[prev_step_index]
         else:
             prev_timestep = timestep
 
+        # if i < 3: # 3
+        #     prev_timestep = timesteps[i + 1]
+        # else:
+        #     prev_timestep = timestep
+
         alpha_prod_t = alphas_cumprod[timestep]
         alpha_prod_t_prev = alphas_cumprod[prev_timestep] if prev_timestep >= 0 else final_alphas_cumprod
-
         beta_prod_t = 1 - alpha_prod_t
         beta_prod_t_prev = 1 - alpha_prod_t_prev
 
@@ -564,28 +584,31 @@ if __name__ == '__main__':
         scaled_timestep = timestep * 10
         c_skip = 0.5 ** 2 / (scaled_timestep ** 2 + 0.5 ** 2)
         c_out = scaled_timestep / (scaled_timestep ** 2 + 0.5 ** 2) ** 0.5
-        predicted_original_sample = (sample - (beta_prod_t ** 0.5) * model_output) / (alpha_prod_t ** 0.5)
+        predicted_original_sample = (sample - (beta_prod_t ** 0.5) * model_output) / (alpha_prod_t ** 0.5) # 数值基本对齐
 
         denoised = c_out * predicted_original_sample + c_skip * sample
-
-        if i != 3:
-            noise = torch.randn(model_output.shape, generator=None, device="cpu", dtype=torch.float32,
-                                layout=torch.strided).to("cpu").detach().numpy()
+        if step_index[i] != 3:
+            # noise = torch.randn(model_output.shape, generator=None, device="cpu", dtype=torch.float32,
+            #                     layout=torch.strided).to("cpu").detach().numpy()
+            device = torch.device("cpu")
+            noise = randn_tensor(model_output.shape, generator=generator, device=device, dtype=torch.float16).numpy() # .astype(np.float32)
+            print(f"白勇强 debug: timestep is {timestep}, \n noise is {noise[0, 2, 10:20, 10]}")
             prev_sample = (alpha_prod_t_prev ** 0.5) * denoised + (beta_prod_t_prev ** 0.5) * noise
         else:
             prev_sample = denoised
 
         latent = prev_sample
 
+        print(f"run onnx, unet latent: {latent[0, 2, 10:20, 10]}")
+
     print(f"unet loop take {1000 * (time.time() - unet_loop_start)}ms")
 
     # vae decoder inference
-    vae_start = time.time()    
+    vae_start = time.time()
     latent = latent / 0.18215
-    # import pdb; pdb.set_trace()
     image = vae_decoder.run([vae_decoder.get_outputs()[0].name], {"x": latent})[0] # ['784']
-    print(f"vae inference take {1000 * (time.time() - vae_start)}ms")
-    
+    print(f"vae decoder inference take {1000 * (time.time() - vae_start)}ms")
+
     # save result
     save_start = time.time() 
     image = np.transpose(image, (0, 2, 3, 1)).squeeze(axis=0)
@@ -598,4 +621,4 @@ if __name__ == '__main__':
     from loguru import logger
     grid_img = make_image_grid([init_image_show, pil_image], rows=1, cols=2)
     grid_img.save(f"./lcm_lora_sdv1-5_imgGrid_output.png")
-    logger.info(f"Image saved in ./lcm_lora_sdv1-5_imgGrid_output.png")
+    logger.info(f"grid image saved in ./lcm_lora_sdv1-5_imgGrid_output.png")
