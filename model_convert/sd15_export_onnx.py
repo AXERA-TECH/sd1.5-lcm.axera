@@ -48,7 +48,7 @@ def extract_by_hand(input_model):
     input_graph.input.extend(new_input)
 
 
-def extract_unet(input_path, input_lora_path, output_path):
+def extract_unet(input_path, input_lora_path, output_path, is_img2img):
     pipe = AutoPipelineForText2Image.from_pretrained(
         input_path, torch_dtype=torch.float32, variant="fp16"
     )
@@ -75,7 +75,7 @@ def extract_unet(input_path, input_lora_path, output_path):
 
         example_input = {
             "sample": torch.rand([1, 4, 64, 64], dtype=torch.float32),
-            "t": torch.from_numpy(np.array(1, dtype=np.int64)),
+            "t": torch.from_numpy(np.array([1], dtype=np.int64)),
             "encoder_hidden_states": torch.rand([1, 77, 768], dtype=torch.float32),
         }
 
@@ -87,24 +87,29 @@ def extract_unet(input_path, input_lora_path, output_path):
             tuple(example_input.values()),
             str(pathlib.Path(output_path) / "unet" / "unet.onnx"),
             opset_version=17,
+            do_constant_folding=True,
             verbose=False,
             input_names=list(example_input.keys()),
         )
         unet = onnx.load(str(pathlib.Path(output_path) / "unet" / "unet.onnx"))
-        unet_sim, _ = onnxsim.simplify(unet)
+        unet_sim, check = onnxsim.simplify(unet)
+        assert check, "Simplified ONNX model could not be validated"
+
         extract_by_hand(unet_sim.graph)
+        # onnx.checker.check_model(unet_sim)
         onnx.save(
             unet_sim,
             str(pathlib.Path(output_path) / "unet_sim_cut.onnx"),
             save_as_external_data=True,
         )
 
+
     """
         precompute time embedding
     """
     time_input = np.zeros([4, 1280], dtype=np.float32)
-    # timesteps = np.array([999, 759, 499, 259]).astype(np.int64) # for text2img
-    timesteps = np.array([499, 259]).astype(np.int64) # for img2img
+    timesteps = np.array([499, 259]).astype(np.int64) if is_img2img \
+        else np.array([999, 759, 499, 259]).astype(np.int64)
     for i, t in enumerate(timesteps):
         tt = torch.from_numpy(np.array([t])).to(torch.float32)
         sample = pipe.unet.time_proj(tt)
@@ -141,6 +146,7 @@ def extract_vae(input_path, output_path):
         dummy_input,
         str(pathlib.Path(output_path) / "sd15_vae_decoder.onnx"),
         opset_version=17,
+        do_constant_folding=True,
         verbose=False,
         input_names=["x"],
     )
@@ -168,6 +174,7 @@ def extract_vae(input_path, output_path):
         str(pathlib.Path(output_path) / "sd15_vae_encoder.onnx"),
         opset_version=17,
         verbose=False,
+        do_constant_folding=True,
         input_names=["image_sample"],
         output_names=["latent_sample"],
     )
@@ -183,11 +190,13 @@ if __name__ == "__main__":
         "--input_lora_path", help="download lora weight path", required=True
     )
     parser.add_argument("--output_path", help="output path", required=True)
+    parser.add_argument("--img2img", action="store_true", help="support image-to-image mode")
+
 
     args = parser.parse_args()
 
     os.makedirs(args.output_path, exist_ok=True)
 
-    extract_unet(args.input_path, args.input_lora_path, args.output_path)
+    extract_unet(args.input_path, args.input_lora_path, args.output_path, args.img2img)
     extract_vae(args.input_path, args.output_path)
     
