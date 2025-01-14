@@ -447,7 +447,7 @@ if __name__ == '__main__':
 
     """
     Usage:
-        - python3 run_onnx_infer.py --prompt "Self-portrait oil painting, a beautiful cyborg with golden hair, 8k" --unet_model output_onnx/modified_unet_sim_cut.onnx  --vae_encoder_model output_onnx/sd15_vae_encoder_sim.onnx --vae_decoder_model output_onnx/sd15_vae_decoder_sim.onnx  --time_input ./models/time_input.npy --save_dir ./tmp.png
+        - python3 run_onnx_infer.py --prompt "Astronauts in a jungle, cold color palette, muted colors, detailed, 8k" --unet_model output_onnx/modified_unet_sim_cut.onnx  --vae_encoder_model output_onnx/sd15_vae_encoder_sim.onnx --vae_decoder_model output_onnx/sd15_vae_decoder_sim.onnx  --time_input ./output_onnx/time_input.npy --save_dir ./img2img_output.png
     """
     args = get_args()
     prompt = args.prompt
@@ -473,7 +473,7 @@ if __name__ == '__main__':
     # text encoder
     start = time.time()    
     # prompt = "Self-portrait oil painting, a beautiful cyborg with golden hair, 8k"
-    prompt = "Astronauts in a jungle, cold color palette, muted colors, detailed, 8k"
+    # prompt = "Astronauts in a jungle, cold color palette, muted colors, detailed, 8k"
     # prompt = "Caricature, a beautiful girl with black hair, 8k"
     prompt_embeds_npy = get_embeds(prompt, tokenizer_dir, text_encoder_dir)
     print(f"text encoder take {1000 * (time.time() - start)}ms")
@@ -497,15 +497,10 @@ if __name__ == '__main__':
 
     # load image
     url = "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/diffusers/img2img-init.png"
-    # url = "/data/tmp/yongqiang/LLM/sd1.5-lcm.axera/image.png"
     init_image = load_image(url) # U8, (512, 512, 3), RGB
     init_image_show = init_image
     
     # vae encoder inference
-    # input_name = sess.get_inputs()[0].name # example
-    # output_name = sess.get_outputs()[0].name
-    # output = sess.run([output_name], {input_name : image_data})
-
     vae_start = time.time()
 
     init_image = preprocess(init_image) # torch.Size([1, 3, 512, 512])
@@ -537,7 +532,7 @@ if __name__ == '__main__':
     latents = init_latents
 
     latents = latents.detach().cpu().numpy()
-    latent = latents # TODO: vae.encoder 结果基本对的上, 但是图生图的结果依然有问题, 怀疑 unet 和 decoder 还存在问题
+    latent = latents
 
     # unet inference loop
     unet_loop_start = time.time()
@@ -548,17 +543,12 @@ if __name__ == '__main__':
         # print(i, timestep)
         
         unet_start = time.time()
-        # TODO: Unet 输出结果和 pytorch 对齐, 这里使用的 onnx 没有预计算 t 值
         noise_pred = unet_session_main.run([unet_session_main.get_outputs()[0].name], {"sample": latent, \
                                             "/down_blocks.0/resnets.0/act_1/Mul_output_0": np.expand_dims(time_input[i], axis=0), \
                                             "encoder_hidden_states": prompt_embeds_npy})[0] # ['5771']
         # noise_pred = unet_session_main.run([unet_session_main.get_outputs()[0].name], {"sample": latent, \
         #                                     "t": np.array(timestep), \
         #                                     "encoder_hidden_states": prompt_embeds_npy})[0] # ['5771']
-        print(f"latent_model_input is {latent[0, 2, 10:20, 10]}")
-        print(f">>>>> noise_pred: {noise_pred[0, 2, 10:20, 10]}")
-        print(f"unet once take {1000 * (time.time() - unet_start)}ms")
-        print("比较 unet 输出结果")
 
         sample = latent
         model_output = noise_pred
@@ -591,15 +581,12 @@ if __name__ == '__main__':
             # noise = torch.randn(model_output.shape, generator=None, device="cpu", dtype=torch.float32,
             #                     layout=torch.strided).to("cpu").detach().numpy()
             device = torch.device("cpu")
-            noise = randn_tensor(model_output.shape, generator=generator, device=device, dtype=torch.float16).numpy() # .astype(np.float32)
-            print(f"白勇强 debug: timestep is {timestep}, \n noise is {noise[0, 2, 10:20, 10]}")
+            noise = randn_tensor(model_output.shape, generator=generator, device=device, dtype=torch.float16).numpy()
             prev_sample = (alpha_prod_t_prev ** 0.5) * denoised + (beta_prod_t_prev ** 0.5) * noise
         else:
             prev_sample = denoised
 
         latent = prev_sample
-
-        print(f"run onnx, unet latent: {latent[0, 2, 10:20, 10]}")
 
     print(f"unet loop take {1000 * (time.time() - unet_loop_start)}ms")
 
