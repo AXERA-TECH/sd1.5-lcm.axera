@@ -442,6 +442,12 @@ def get_alphas_cumprod():
     self_timesteps = np.arange(0, 1000)[::-1].copy().astype(np.int64)
     return alphas_cumprod, final_alphas_cumprod, self_timesteps
 
+def resize_and_rgb(image: PIL.Image.Image) -> PIL.Image.Image:
+    """
+    Resize the image to 512x512 and convert it to RGB.
+    """
+    return image.resize((512, 512)).convert("RGB")
+
 
 if __name__ == '__main__':
 
@@ -497,7 +503,7 @@ if __name__ == '__main__':
 
     # load image
     url = "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/diffusers/img2img-init.png"
-    init_image = load_image(url) # U8, (512, 512, 3), RGB
+    init_image = load_image(url, convert_method=resize_and_rgb) # U8, (512, 512, 3), RGB
     init_image_show = init_image
     
     # vae encoder inference
