@@ -6,6 +6,7 @@ import onnxsim
 import torch
 import os
 from diffusers import LCMScheduler, AutoPipelineForText2Image, AutoencoderKL
+from transformers import CLIPTokenizer, CLIPTextModel, PreTrainedTokenizer, CLIPTextModelWithProjection
 
 """
 test env:
@@ -48,7 +49,17 @@ def extract_by_hand(input_model):
     input_graph.input.extend(new_input)
 
 
-def extract_unet(input_path, input_lora_path, output_path, is_img2img):
+def extract_unet(args):
+
+    input_path = args.input_path
+    input_lora_path = args.input_lora_path
+    output_path = args.output_path
+    is_img2img = args.img2img
+    isize = args.isize
+    vae_encoder_img_h, vae_encoder_img_w = list(map(int, isize.split("x")))
+    unet_feat_h = vae_encoder_img_h // 8
+    unet_feat_w = vae_encoder_img_w // 8
+
     pipe = AutoPipelineForText2Image.from_pretrained(
         input_path, torch_dtype=torch.float32, variant="fp16"
     )
@@ -74,7 +85,7 @@ def extract_unet(input_path, input_lora_path, output_path, is_img2img):
                 return self.unet.forward(sample, t, encoder_hidden_states)
 
         example_input = {
-            "sample": torch.rand([1, 4, 64, 64], dtype=torch.float32),
+            "sample": torch.rand([1, 4, unet_feat_h, unet_feat_w], dtype=torch.float32),
             "t": torch.from_numpy(np.array([1], dtype=np.int64)),
             "encoder_hidden_states": torch.rand([1, 77, 768], dtype=torch.float32),
         }
@@ -103,7 +114,6 @@ def extract_unet(input_path, input_lora_path, output_path, is_img2img):
             save_as_external_data=True,
         )
 
-
     """
         precompute time embedding
     """
@@ -120,7 +130,15 @@ def extract_unet(input_path, input_lora_path, output_path, is_img2img):
     np.save(str(pathlib.Path(output_path) / "time_input.npy"), time_input)
 
 
-def extract_vae(input_path, output_path):
+def extract_vae(args):
+
+    input_path = args.input_path
+    output_path = args.output_path
+    isize = args.isize
+
+    vae_encoder_img_h, vae_encoder_img_w = list(map(int, isize.split("x")))
+    vae_decoder_img_h = vae_encoder_img_h // 8
+    vae_decoder_img_w = vae_encoder_img_w // 8
 
     vae = AutoencoderKL.from_pretrained(
         str(pathlib.Path(input_path) / "vae"), torch_dtype=torch.float32, variant="fp16"
@@ -128,7 +146,7 @@ def extract_vae(input_path, output_path):
     vae.eval()
 
     # 导出 VAE 的 Decoder 部分
-    dummy_input = torch.rand([1, 4, 64, 64], dtype=torch.float32)
+    dummy_input = torch.rand([1, 4, vae_decoder_img_h, vae_decoder_img_w], dtype=torch.float32)
     class VAEDecoderWrapper(torch.nn.Module):
         def __init__(self, conv_quant, decoder):
             super().__init__()
@@ -155,7 +173,10 @@ def extract_vae(input_path, output_path):
     onnx.save(vae_decoder_onnx_sim, str(pathlib.Path(output_path) / "sd15_vae_decoder_sim.onnx"))
 
     # 导出 VAE 的 Encoder 部分
-    dummy_input = torch.rand([1, 3, 512, 512], dtype=torch.float32)
+    dummy_input = torch.rand([1, 3, vae_encoder_img_h, vae_encoder_img_w], dtype=torch.float32)
+    dynamic_axes = {
+        'image_sample': {2: 'H', 3: 'W'},
+    }
     class VAEEncoderWrapper(torch.nn.Module):
         def __init__(self, encoder, pre_quant_conv):
             super().__init__()
@@ -177,13 +198,69 @@ def extract_vae(input_path, output_path):
         do_constant_folding=True,
         input_names=["image_sample"],
         output_names=["latent_sample"],
+        # dynamic_axes=dynamic_axes,
     )
     vae_encoder_onnx = onnx.load(str(pathlib.Path(output_path) / "sd15_vae_encoder.onnx"))
     vae_encoder_onnx_sim, _ = onnxsim.simplify(vae_encoder_onnx)
     onnx.save(vae_encoder_onnx_sim, str(pathlib.Path(output_path) / "sd15_vae_encoder_sim.onnx"))
 
 
+def extract_text_encoder(args):
+    input_path = args.input_path
+    output_path = args.output_path
+    max_length = 77
+
+    text_encoder = CLIPTextModel.from_pretrained(
+        str(pathlib.Path(input_path) / "text_encoder"), torch_dtype=torch.float32, variant="fp16"
+    )
+
+    text_encoder.eval()
+
+    dummy_input = torch.randint(1, 100, (1, max_length), dtype=torch.int64)
+
+    torch.onnx.export(
+        text_encoder.text_model,
+        dummy_input,
+        str(pathlib.Path(output_path) / "sd15_text_encoder.onnx"),
+        opset_version=17,
+        do_constant_folding=True,
+        verbose=False,
+        input_names=["input_ids"],
+        output_names=["last_hidden_state"],
+    )
+    text_encoder_onnx = onnx.load(str(pathlib.Path(output_path) / "sd15_text_encoder.onnx"))
+    text_encoder_onnx_sim, _ = onnxsim.simplify(text_encoder_onnx)
+    extract_text_encoder_by_hand(text_encoder_onnx_sim.graph)
+    onnx.save(text_encoder_onnx_sim, str(pathlib.Path(output_path) / "sd15_text_encoder_sim.onnx"))
+
+
+def extract_text_encoder_by_hand(input_model):
+    input_graph = input_model
+    to_remove_node_name = ["/Cast", "/ArgMax", "/Add", "/Flatten", "/Gather_2", "/Reshape_1", "/Reshape_2"]
+    to_remove_node = []
+    for node in input_graph.node:
+        if node.name in to_remove_node_name:
+            to_remove_node.append(node)
+        else:
+            pass
+    for node in to_remove_node:
+        input_graph.node.remove(node)
+
+    to_remove_output_name = ["1853"]
+    to_remove_output = []
+    for output in input_graph.output:
+        if output.name in to_remove_output_name:
+            to_remove_output.append(output)
+    for output in to_remove_output:
+        input_graph.output.remove(output)
+
+
 if __name__ == "__main__":
+
+    """
+    Usage:
+        python3 model_convert/sd15_export_onnx.py --input_path ../hugging_face/models/dreamshaper-7 --input_lora_path ../hugging_face/models/lcm-lora-sdv1-5 --output_path ./output_onnx_256x256 --img2img --isize 256x256
+    """
     parser = argparse.ArgumentParser(description="unet extract")
     parser.add_argument("--input_path", required=True, help="download sd_15 path")
     parser.add_argument(
@@ -191,12 +268,13 @@ if __name__ == "__main__":
     )
     parser.add_argument("--output_path", help="output path", required=True)
     parser.add_argument("--img2img", action="store_true", help="support image-to-image mode")
-
+    parser.add_argument("--isize", default="512x512", help="vae encoder input image size")
 
     args = parser.parse_args()
 
     os.makedirs(args.output_path, exist_ok=True)
 
-    extract_unet(args.input_path, args.input_lora_path, args.output_path, args.img2img)
-    extract_vae(args.input_path, args.output_path)
+    extract_text_encoder(args)
+    extract_unet(args)
+    extract_vae(args)
     
