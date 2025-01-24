@@ -498,8 +498,8 @@ if __name__ == '__main__':
     # prompt = "Self-portrait oil painting, a beautiful cyborg with golden hair, 8k"
     # prompt = "Astronauts in a jungle, cold color palette, muted colors, detailed, 8k"
     # prompt = "Caricature, a beautiful girl with black hair, 8k"
+    # prompt = "Pink cat, in a tree which have many leaves , detailed, 8k"
     # prompt_embeds_npy = get_embeds(prompt, tokenizer_dir, text_encoder_dir)
-    prompt = "Pink cat, in a tree which have many leaves , detailed, 8k"
 
     input_ids = get_input_ids(prompt, tokenizer_dir)
     text_encoder = onnxruntime.InferenceSession(text_encoder_model)
@@ -530,8 +530,8 @@ if __name__ == '__main__':
     input_size = (inp_h, inp_w)
 
     # load image
-    # url = "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/diffusers/img2img-init.png"
-    url = '/data/tmp/yongqiang/LLM/hugging_face/img_cat.png'
+    url = "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/diffusers/img2img-init.png"
+    # url = '/data/tmp/yongqiang/LLM/hugging_face/img_cat.png'
     init_image = load_image(url, convert_method=resize_and_rgb) # U8, (512, 512, 3), RGB, HxW 尺寸可变
     init_image_show = init_image
 
