@@ -1,11 +1,11 @@
 from typing import List, Union
 import numpy as np
-import onnxruntime
+# import onnxruntime
+import axengine 
 import torch
 from PIL import Image
 from transformers import CLIPTokenizer, CLIPTextModel, PreTrainedTokenizer, CLIPTextModelWithProjection
-# from diffusers import UNet2DConditionModel, DiffusionPipeline, LCMScheduler, AutoencoderKL
-# from axengine import InferenceSession
+
 import time
 import argparse
 from diffusers.utils import load_image
@@ -18,7 +18,7 @@ from diffusers.utils import make_image_grid, load_image
 
 
 
-# Img2Img
+########## Img2Img
 PipelineImageInput = Union[
     PIL.Image.Image,
     np.ndarray,
@@ -75,71 +75,6 @@ def retrieve_latents(
         return encoder_output.latents
     else:
         raise AttributeError("Could not access latents of provided encoder_output")
-
-def prepare_latents(image, timestep, batch_size, num_images_per_prompt, dtype, device, generator=None):
-    if not isinstance(image, (torch.Tensor, PIL.Image.Image, list)):
-        raise ValueError(
-            f"`image` has to be of type `torch.Tensor`, `PIL.Image.Image` or list but is {type(image)}"
-        )
-
-    image = image.to(device=device, dtype=dtype)
-
-    batch_size = batch_size * num_images_per_prompt
-
-    if image.shape[1] == 4:
-        init_latents = image
-
-    else:
-        if isinstance(generator, list) and len(generator) != batch_size:
-            raise ValueError(
-                f"You have passed a list of generators of length {len(generator)}, but requested an effective batch"
-                f" size of {batch_size}. Make sure the batch size matches the length of the generators."
-            )
-
-        elif isinstance(generator, list):
-            if image.shape[0] < batch_size and batch_size % image.shape[0] == 0:
-                image = torch.cat([image] * (batch_size // image.shape[0]), dim=0)
-            elif image.shape[0] < batch_size and batch_size % image.shape[0] != 0:
-                raise ValueError(
-                    f"Cannot duplicate `image` of batch size {image.shape[0]} to effective batch_size {batch_size} "
-                )
-
-            init_latents = [
-                retrieve_latents(self.vae.encode(image[i : i + 1]), generator=generator[i])
-                for i in range(batch_size)
-            ]
-            init_latents = torch.cat(init_latents, dim=0)
-        else:
-            init_latents = retrieve_latents(self.vae.encode(image), generator=generator)
-
-        init_latents = self.vae.config.scaling_factor * init_latents
-
-    if batch_size > init_latents.shape[0] and batch_size % init_latents.shape[0] == 0:
-        # expand init_latents for batch_size
-        deprecation_message = (
-            f"You have passed {batch_size} text prompts (`prompt`), but only {init_latents.shape[0]} initial"
-            " images (`image`). Initial images are now duplicating to match the number of text prompts. Note"
-            " that this behavior is deprecated and will be removed in a version 1.0.0. Please make sure to update"
-            " your script to pass as many initial images as text prompts to suppress this warning."
-        )
-        deprecate("len(prompt) != len(image)", "1.0.0", deprecation_message, standard_warn=False)
-        additional_image_per_prompt = batch_size // init_latents.shape[0]
-        init_latents = torch.cat([init_latents] * additional_image_per_prompt, dim=0)
-    elif batch_size > init_latents.shape[0] and batch_size % init_latents.shape[0] != 0:
-        raise ValueError(
-            f"Cannot duplicate `image` of batch size {init_latents.shape[0]} to {batch_size} text prompts."
-        )
-    else:
-        init_latents = torch.cat([init_latents], dim=0)
-
-    shape = init_latents.shape
-    noise = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
-
-    # get latents
-    init_latents = self.scheduler.add_noise(init_latents, noise, timestep)
-    latents = init_latents
-
-    return latents
 
 def numpy_to_pt(images: np.ndarray) -> torch.Tensor:
     r"""
@@ -246,7 +181,6 @@ def preprocess(
     resize_mode: str = "default",  # "default", "fill", "crop"
     crops_coords: Optional[Tuple[int, int, int, int]] = None,
 ) -> torch.Tensor:
-
     """
     Preprocess the image input.
 
@@ -326,7 +260,6 @@ def preprocess(
         #     image = [self.convert_to_rgb(i) for i in image]
         # elif self.config.do_convert_grayscale:
         #     image = [self.convert_to_grayscale(i) for i in image]
-
         image = pil_to_numpy(image)  # to np
         image = numpy_to_pt(image)  # to pt
 
@@ -363,7 +296,6 @@ def preprocess(
             FutureWarning,
         )
         do_normalize = False
-
     if do_normalize:
         image = normalize(image)
 
@@ -371,6 +303,7 @@ def preprocess(
     #     image = self.binarize(image)
 
     return image
+##########
 
 
 def get_args():
@@ -378,14 +311,14 @@ def get_args():
         prog="StableDiffusion",
         description="Generate picture with the input prompt"
     )
-    parser.add_argument("--prompt", "-p", type=str, required=False, default="Self-portrait oil painting, a beautiful cyborg with golden hair, 8k", help="the input text prompt")
-    parser.add_argument("--text_model_dir", "-e", type=str, required=False, default="./models/", help="the dir of text encoder and tokenizer files")
-    parser.add_argument("--unet_model", "-u", type=str, required=False, default="./models/unet.axmodel", help="the dir of unet.axmodel")
-    parser.add_argument("--vae_encoder_model", type=str, required=False, default="./models/vae_encoder_model.axmodel", help="the dir of vae.axmodel")
-    parser.add_argument("--vae_decoder_model", type=str, required=False, default="./models/vae_decoder_model.axmodel", help="the dir of vae.axmodel")
-    parser.add_argument("--text_encoder_model", type=str, required=False, default="./models/text_encoder_model.axmodel", help="the dir of vae.axmodel")
-    parser.add_argument("--time_input", "-t", type=str, required=False, default="./models/time_input.npy", help="the dir of time input file")
-    parser.add_argument("--save_dir", "-s", type=str, required=False, default="./lcm_lora_sdv1_5_axmodel.png", help="the save dir of the output image")
+    parser.add_argument("--prompt", type=str, required=False, default="Astronauts in a jungle, cold color palette, muted colors, detailed, 8k", help="the input text prompt")
+    parser.add_argument("--text_model_dir", type=str, required=False, default="./models/", help="Path to text encoder and tokenizer files")
+    parser.add_argument("--unet_model", type=str, required=False, default="./models/unet.axmodel", help="Path to unet axmodel model")
+    parser.add_argument("--vae_encoder_model", type=str, required=False, default="./models/vae_encoder.axmodel", help="Path to vae encoder axmodel model")
+    parser.add_argument("--vae_decoder_model", type=str, required=False, default="./models/vae_decoder.axmodel", help="Path to vae decoder axmodel model")
+    parser.add_argument("--time_input", type=str, required=False, default="./models/time_input_img2img.npy", help="Path to time input file")
+    parser.add_argument("--init_image", type=str, required=False, default="./models/img2img-init.png", help="Path to initial image file")
+    parser.add_argument("--save_dir", type=str, required=False, default="./img2img_output_axe.png", help="Path to the output image file")
     return parser.parse_args()
 
 def maybe_convert_prompt(prompt: Union[str, List[str]], tokenizer: "PreTrainedTokenizer"):  # noqa: F821
@@ -436,17 +369,6 @@ def get_embeds(prompt = "Portrait of a pretty girl", tokenizer_dir = "./models/t
     prompt_embeds_npy = prompt_embeds[0].detach().numpy()
     return prompt_embeds_npy
 
-def get_input_ids(prompt = "Portrait of a pretty girl", tokenizer_dir = "./models/tokenizer"):
-    tokenizer = CLIPTokenizer.from_pretrained(tokenizer_dir)
-    text_inputs = tokenizer(
-        prompt,
-        padding="max_length",
-        max_length=77,
-        truncation=True,
-        return_tensors="pt",
-    )
-    text_input_ids = text_inputs.input_ids
-    return text_input_ids
 
 def get_alphas_cumprod():
     betas = torch.linspace(0.00085 ** 0.5, 0.012 ** 0.5, 1000, dtype=torch.float32) ** 2
@@ -456,61 +378,52 @@ def get_alphas_cumprod():
     self_timesteps = np.arange(0, 1000)[::-1].copy().astype(np.int64)
     return alphas_cumprod, final_alphas_cumprod, self_timesteps
 
-input_size = (512, 512)
-
 def resize_and_rgb(image: PIL.Image.Image) -> PIL.Image.Image:
     """
     Resize the image to 512x512 and convert it to RGB.
     """
-    return image.resize(input_size).convert("RGB")
+    return image.resize((512, 512)).convert("RGB")
 
 
 if __name__ == '__main__':
 
     """
     Usage:
-        - python3 run_onnx_infer.py --prompt "Astronauts in a jungle, cold color palette, muted colors, detailed, 8k" --unet_model output_onnx/modified_unet_sim_cut.onnx  --vae_encoder_model output_onnx/sd15_vae_encoder_sim.onnx --vae_decoder_model output_onnx/sd15_vae_decoder_sim.onnx  --time_input ./output_onnx/time_input.npy --save_dir ./img2img_output.png
+        - python3 run_img2img_axmodel_infer.py --prompt "Astronauts in a jungle, cold color palette, muted colors, detailed, 8k" --unet_model output_onnx/unet_sim.onnx  --vae_encoder_model output_onnx/vae_encoder_sim.onnx --vae_decoder_model output_onnx/vae_decoder_sim.onnx  --time_input ./output_onnx/time_input.npy --save_dir ./img2img_output.png
     """
     args = get_args()
     prompt = args.prompt
     tokenizer_dir = args.text_model_dir + 'tokenizer'
-    # text_encoder_dir = args.text_model_dir + 'text_encoder'
-    text_encoder_model = args.text_encoder_model
+    text_encoder_dir = args.text_model_dir + 'text_encoder'
     unet_model = args.unet_model
     vae_decoder_model = args.vae_decoder_model
     vae_encoder_model = args.vae_encoder_model
+    init_image = args.init_image
     time_input = args.time_input
     save_dir = args.save_dir
 
     print(f"prompt: {prompt}")
     print(f"text_tokenizer: {tokenizer_dir}")
-    print(f"text_encoder: {text_encoder_model}")
+    print(f"text_encoder: {text_encoder_dir}")
     print(f"unet_model: {unet_model}")
     print(f"vae_encoder_model: {vae_encoder_model}")
     print(f"vae_decoder_model: {vae_decoder_model}")
+    print(f"init image: {init_image}")
     print(f"time_input: {time_input}")
     print(f"save_dir: {save_dir}")
 
     # timesteps = np.array([999, 759, 499, 259]).astype(np.int64)
 
     # text encoder
-    start = time.time()
+    start = time.time()    
     # prompt = "Self-portrait oil painting, a beautiful cyborg with golden hair, 8k"
     # prompt = "Astronauts in a jungle, cold color palette, muted colors, detailed, 8k"
     # prompt = "Caricature, a beautiful girl with black hair, 8k"
-    # prompt = "Pink cat, in a tree which have many leaves , detailed, 8k"
-    # prompt_embeds_npy = get_embeds(prompt, tokenizer_dir, text_encoder_dir)
-
-    input_ids = get_input_ids(prompt, tokenizer_dir)
-    text_encoder = onnxruntime.InferenceSession(text_encoder_model)
-    text_encoder_onnx_inp_name = text_encoder.get_inputs()[0].name
-    text_encoder_onnx_out_name = text_encoder.get_outputs()[0].name
-    text_encoder_onnx_out = text_encoder.run([text_encoder_onnx_out_name], {text_encoder_onnx_inp_name: input_ids.to("cpu").numpy()})[0] # text encoder 输出: torch.Size([1, 77, 768])
-    prompt_embeds_npy = text_encoder_onnx_out
+    prompt_embeds_npy = get_embeds(prompt, tokenizer_dir, text_encoder_dir)
     print(f"text encoder take {1000 * (time.time() - start)}ms")
 
     prompt_name = prompt.replace(" ", "_")
-    # latents_shape = [1, 4, 64, 64]
+    latents_shape = [1, 4, 64, 64]
     # latent = torch.randn(latents_shape, generator=None, device="cpu", dtype=torch.float32,
     #                      layout=torch.strided).detach().numpy()
 
@@ -518,49 +431,36 @@ if __name__ == '__main__':
 
     # load unet model and vae model
     start = time.time()
-    vae_encoder = onnxruntime.InferenceSession(vae_encoder_model)
-    unet_session_main = onnxruntime.InferenceSession(unet_model)
-    vae_decoder = onnxruntime.InferenceSession(vae_decoder_model)
+    vae_encoder = axengine.InferenceSession(vae_encoder_model)
+    unet_session_main = axengine.InferenceSession(unet_model)
+    vae_decoder = axengine.InferenceSession(vae_decoder_model)
     print(f"load models take {1000 * (time.time() - start)}ms")
 
     # load time input file
     time_input = np.load(time_input)
-    _, _, inp_h, inp_w = vae_encoder.get_inputs()[0].shape
-
-    input_size = (inp_h, inp_w)
 
     # load image
-    url = "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/diffusers/img2img-init.png"
-    # url = '/data/tmp/yongqiang/LLM/hugging_face/img_cat.png'
-    init_image = load_image(url, convert_method=resize_and_rgb) # U8, (512, 512, 3), RGB, HxW 尺寸可变
+    # url = "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/diffusers/img2img-init.png"
+    url = init_image
+    init_image = load_image(url, convert_method=resize_and_rgb) # U8, (512, 512, 3), RGB
     init_image_show = init_image
-
+    
     # vae encoder inference
     vae_start = time.time()
 
-    # 前处理 preprocess 函数
-    # init_image = preprocess(init_image) # torch.Size([1, 3, 512, 512])
-    # 替换 preprocess 的简化版的前处理逻辑
-    mean = 127.5
-    std = 127.5
-    init_image = (np.array(init_image) - mean) / std
-    init_image = np.transpose(init_image, (2, 0, 1)) # (3, 512, 512)
-    init_image = np.expand_dims(init_image, axis=0) # (1, 3, 512, 512)
-    init_image = torch.from_numpy(init_image.astype(np.float32)) # torch.Size([1, 3, 512, 512])
-    #######################################
-
+    init_image = preprocess(init_image) # torch.Size([1, 3, 512, 512])
     if isinstance(init_image, torch.Tensor):
-        init_image = init_image.detach().numpy() # 结果对齐
+        init_image = init_image.detach().numpy()
 
     vae_encoder_onnx_inp_name = vae_encoder.get_inputs()[0].name
     vae_encoder_onnx_out_name = vae_encoder.get_outputs()[0].name
-    # vae_encoder_out.shape (1, 8, 64, 64), 数值基本对的上 (onnx fp32, torch fp16, 精度上会有点区别)
-    # /home/baiyongqiang/miniforge-pypy3/envs/hf/lib/python3.9/site-packages/diffusers/models/autoencoders/autoencoder_kl.py#256
-    vae_encoder_out = vae_encoder.run([vae_encoder_onnx_out_name], {vae_encoder_onnx_inp_name: init_image})[0] # encoder 输出: torch.Size([1, 8, 64, 64]), 最终结果 Size([1, 4, 64, 64])
+    
+    # vae_encoder_out.shape (1, 8, 64, 64)
+    vae_encoder_out = vae_encoder.run(None, {vae_encoder_onnx_inp_name: init_image})[0] # encoder out: torch.Size([1, 8, 64, 64])
     print(f"vae encoder inference take {1000 * (time.time() - vae_start)}ms")
 
-    # vae_encoder 处理
-    device = torch.device("cuda:0")
+    # vae encoder inference
+    device = torch.device("cpu")
     vae_encoder_out = torch.from_numpy(vae_encoder_out).to(torch.float32)
     posterior = DiagonalGaussianDistribution(vae_encoder_out) # 数值基本对的上
     vae_encode_info = AutoencoderKLOutput(latent_dist=posterior)
@@ -585,15 +485,12 @@ if __name__ == '__main__':
     self_timesteps = np.array([999, 759, 499, 259]).astype(np.int64)
     step_index = [2, 3]
     for i, timestep in enumerate(timesteps):
-        # print(i, timestep)
-        
         unet_start = time.time()
-        noise_pred = unet_session_main.run([unet_session_main.get_outputs()[0].name], {"sample": latent, \
+        noise_pred = unet_session_main.run(None, {"sample": latent, \
                                             "/down_blocks.0/resnets.0/act_1/Mul_output_0": np.expand_dims(time_input[i], axis=0), \
-                                            "encoder_hidden_states": prompt_embeds_npy})[0] # ['5771']
-        # noise_pred = unet_session_main.run([unet_session_main.get_outputs()[0].name], {"sample": latent, \
-        #                                     "t": np.array(timestep), \
-        #                                     "encoder_hidden_states": prompt_embeds_npy})[0] # ['5771']
+                                            "encoder_hidden_states": prompt_embeds_npy})[0]
+                                            
+        print(f"unet once take {1000 * (time.time() - unet_start)}ms")
 
         sample = latent
         model_output = noise_pred
@@ -604,11 +501,6 @@ if __name__ == '__main__':
             prev_timestep = self_timesteps[prev_step_index]
         else:
             prev_timestep = timestep
-
-        # if i < 3: # 3
-        #     prev_timestep = timesteps[i + 1]
-        # else:
-        #     prev_timestep = timestep
 
         alpha_prod_t = alphas_cumprod[timestep]
         alpha_prod_t_prev = alphas_cumprod[prev_timestep] if prev_timestep >= 0 else final_alphas_cumprod
@@ -623,8 +515,6 @@ if __name__ == '__main__':
 
         denoised = c_out * predicted_original_sample + c_skip * sample
         if step_index[i] != 3:
-            # noise = torch.randn(model_output.shape, generator=None, device="cpu", dtype=torch.float32,
-            #                     layout=torch.strided).to("cpu").detach().numpy()
             device = torch.device("cpu")
             noise = randn_tensor(model_output.shape, generator=generator, device=device, dtype=torch.float16).numpy()
             prev_sample = (alpha_prod_t_prev ** 0.5) * denoised + (beta_prod_t_prev ** 0.5) * noise
@@ -638,7 +528,7 @@ if __name__ == '__main__':
     # vae decoder inference
     vae_start = time.time()
     latent = latent / 0.18215
-    image = vae_decoder.run([vae_decoder.get_outputs()[0].name], {"x": latent})[0] # ['784']
+    image = vae_decoder.run(None, {"x": latent})[0] # ['784']
     print(f"vae decoder inference take {1000 * (time.time() - vae_start)}ms")
 
     # save result
@@ -648,9 +538,9 @@ if __name__ == '__main__':
     image = (image_denorm * 255).round().astype("uint8")
     pil_image = Image.fromarray(image[:, :, :3])
     pil_image.save(save_dir)
-    print(f"save image take {1000 * (time.time() - vae_start)}ms")
-
-    from loguru import logger
+    
     grid_img = make_image_grid([init_image_show, pil_image], rows=1, cols=2)
-    grid_img.save(f"./lcm_lora_sdv1-5_imgGrid_output.png")
-    logger.info(f"grid image saved in ./lcm_lora_sdv1-5_imgGrid_output.png")
+    grid_img.save(f"./lcm_lora_sdv1-5_imgGrid_output.png")    
+    
+    print(f"grid image saved in ./lcm_lora_sdv1-5_imgGrid_output.png")
+    print(f"save image take {1000 * (time.time() - vae_start)}ms")	

@@ -30,6 +30,8 @@ output_onnx/
 ├── cc6a243a-b7a8-11ef-bb2a-9d527016cd35
 ├── sd15_vae_decoder.onnx
 ├── sd15_vae_decoder_sim.onnx
+├── sd15_vae_encoder.onnx
+├── sd15_vae_encoder_sim.onnx
 ├── time_input.npy
 ├── unet
 └── unet_sim_cut.onnx
@@ -62,10 +64,17 @@ calib_data_vae
 
 **unet**
 ```
-pulsar2 build --input output_onnx/unet_sim_cut.onnx --config unet_u16.json --output_dir output_unet --output_name unet.axmodel
+pulsar2 build --input output_onnx/unet_sim_cut.onnx --config config_unet_u16.json --output_dir output_unet --output_name unet.axmodel
 ```
 
-**vae**
+**vae encoder**
+
 ```
-pulsar2 build --input output_onnx/sd15_vae_decoder_sim.onnx --config vae_u16.json --output_dir output_vae --output_name vae.axmodel
+pulsar2 build --input output_onnx/sd15_vae_encoder_sim.onnx --config config_vae_encoder_u16.json --output_dir output_vae_encoder --output_name vae_encoder.axmodel
+```
+
+**vae decoder**
+
+```
+pulsar2 build --input output_onnx/sd15_vae_decoder_sim.onnx --config config_vae_decoder_u16.json --output_dir output_vae_decoder --output_name vae_decoder.axmodel
 ```
