@@ -5,6 +5,7 @@ import tarfile
 import onnxruntime
 import torch
 from PIL import Image
+import argparse
 from transformers import CLIPTokenizer, CLIPTextModel, PreTrainedTokenizer, CLIPTextModelWithProjection
 from diffusers import UNet2DConditionModel, DiffusionPipeline, LCMScheduler, AutoencoderKL
 
@@ -39,11 +40,11 @@ def _maybe_convert_prompt(prompt: str, tokenizer: "PreTrainedTokenizer"):  # noq
     return prompt
 
 
-def get_embeds(prompt = "Portrait of a pretty girl", ):
-    tokenizer = CLIPTokenizer.from_pretrained("Lykon/dreamshaper-7/tokenizer")
-    text_encoder = CLIPTextModel.from_pretrained("Lykon/dreamshaper-7/text_encoder",
-                                                 torch_dtype=torch.float32,
-                                                 variant="fp16")
+def get_embeds(model_path, prompt = "Portrait of a pretty girl", ):
+    tokenizer = CLIPTokenizer.from_pretrained("./tokenizer")
+    # text_encoder = CLIPTextModel.from_pretrained("Lykon/dreamshaper-7",
+    #                                              torch_dtype=torch.float32,
+    #                                              variant="fp16")
     text_inputs = tokenizer(
         prompt,
         padding="max_length",
@@ -52,9 +53,18 @@ def get_embeds(prompt = "Portrait of a pretty girl", ):
         return_tensors="pt",
     )
     text_input_ids = text_inputs.input_ids
-    prompt_embeds = text_encoder(text_input_ids.to("cpu"), attention_mask=None)
 
-    prompt_embeds_npy = prompt_embeds[0].detach().numpy()
+    # prompt_embeds = text_encoder(text_input_ids.to("cpu"), attention_mask=None)
+    # prompt_embeds_npy = prompt_embeds[0].detach().numpy()
+    text_encoder = onnxruntime.InferenceSession(
+        os.path.join(
+            model_path,
+            "sd15_text_encoder_sim.onnx"
+        ),
+        providers=["CPUExecutionProvider"]
+    )
+    text_encoder_onnx_out = text_encoder.run(None, {"input_ids": text_input_ids.to("cpu").numpy()})[0]
+    prompt_embeds_npy = text_encoder_onnx_out
     return prompt_embeds_npy
 
 
@@ -69,16 +79,23 @@ def get_alphas_cumprod():
 
 if __name__ == '__main__':
 
+    parser = argparse.ArgumentParser(description="unet extract")
+    parser.add_argument("--export_onnx_dir", required=True, help="download sd_15 path")
+    # parser.add_argument("--time_input", help="download lora weight path", required=True)
+
+    args = parser.parse_args()
+
     timesteps = np.array([999, 759, 499, 259]).astype(np.int64)
     alphas_cumprod, final_alphas_cumprod, self_timesteps = get_alphas_cumprod()
-    unet_session_main = onnxruntime.InferenceSession("output_onnx/unet_sim_cut.onnx")
-    time_input = np.load("output_onnx/time_input.npy")
-    
-    os.makedirs("calib_data_unet", exist_ok=True)
-    os.makedirs("calib_data_vae", exist_ok=True)
-    
-    calib_tarfile_unet = tarfile.open(f"calib_data_unet/data.tar", "w")
-    calib_tarfile_vae = tarfile.open(f"calib_data_vae/data.tar", "w")
+    unet_session_main = onnxruntime.InferenceSession(args.export_onnx_dir + "/unet.onnx",
+                                                     providers=["CPUExecutionProvider"])
+    time_input = np.load(args.export_onnx_dir + "/time_input_txt2img.npy")
+
+    os.makedirs("datasets/calib_data_unet", exist_ok=True)
+    os.makedirs("datasets/calib_data_vae", exist_ok=True)
+
+    calib_tarfile_unet = tarfile.open(f"datasets/calib_data_unet/data.tar", "w")
+    calib_tarfile_vae = tarfile.open(f"datasets/calib_data_vae/data.tar", "w")
 
     prompts = ['Self-portrait oil painting, a beautiful cyborg with golden hair, 8k',
                'ultra close-up color photo portrait of rainbow owl with deer horns in the woods',
@@ -101,7 +118,7 @@ if __name__ == '__main__':
                'A dog looking curiously in the mirror',
                'A bald eagle made of chocolate powder, mango, and whipped cream.']
     for p, prompt in enumerate(prompts):
-        prompt_embeds_npy = get_embeds(prompt)
+        prompt_embeds_npy = get_embeds(args.export_onnx_dir, prompt)
         prompt_name = prompt.replace(" ", "_")
         latent = torch.randn([1, 4, 64, 64], generator=None, device="cpu", dtype=torch.float32, layout=torch.strided).detach().numpy()
         print(p, prompt)
@@ -116,8 +133,8 @@ if __name__ == '__main__':
             calib_data["sample"] = latent
             calib_data["/down_blocks.0/resnets.0/act_1/Mul_output_0"] = np.expand_dims(time_input[i], axis=0)
             calib_data["encoder_hidden_states"] = prompt_embeds_npy
-            np.save(f"calib_data_unet/data_{p}_{i}.npy", calib_data)
-            calib_tarfile_unet.add(f"calib_data_unet/data_{p}_{i}.npy")
+            np.save(f"datasets/calib_data_unet/data_{p}_{i}.npy", calib_data)
+            calib_tarfile_unet.add(f"datasets/calib_data_unet/data_{p}_{i}.npy")
 
             sample = latent
             model_output = noise_pred
@@ -151,8 +168,8 @@ if __name__ == '__main__':
         latent = latent / 0.18215
         calib_data = {}
         calib_data["x"] = latent
-        np.save(f"calib_data_vae/data_{p}.npy", calib_data)
-        calib_tarfile_vae.add(f"calib_data_vae/data_{p}.npy")
+        np.save(f"datasets/calib_data_vae/data_{p}.npy", calib_data)
+        calib_tarfile_vae.add(f"datasets/calib_data_vae/data_{p}.npy")
         
     calib_tarfile_unet.close()
     calib_tarfile_vae.close()

@@ -8,6 +8,13 @@ __pycache__/
 output*
 save*
 tmp*
+axmodel*
+onnx-models*
+
+#LargeFile
+*.onnx
+*.axmodel
+*.npy
 
 # C extensions
 *.so
