@@ -53,8 +53,7 @@ def _maybe_convert_prompt(prompt: str, tokenizer: "PreTrainedTokenizer"):  # noq
     return prompt
 
 
-def get_embeds(prompt = "Portrait of a pretty girl", tokenizer_dir = "./models/tokenizer", text_encoder_dir = "./models/text_encoder"):
-    tokenizer = CLIPTokenizer.from_pretrained(tokenizer_dir)
+def get_embeds(prompt, tokenizer, text_encoder):
 
     text_inputs = tokenizer(
         prompt,
@@ -64,14 +63,9 @@ def get_embeds(prompt = "Portrait of a pretty girl", tokenizer_dir = "./models/t
         return_tensors="pt",
     )
     text_input_ids = text_inputs.input_ids
-
-    text_encoder = axengine.InferenceSession(
-        os.path.join(
-            text_encoder_dir,
-            "sd15_text_encoder_sim.axmodel"
-        ),
-    )
+    start = time.time()
     text_encoder_onnx_out = text_encoder.run(None, {"input_ids": text_input_ids.to("cpu").numpy().astype(np.int32)})[0]
+    print(f"text encoder axmodel take {(1000 * (time.time() - start)):.1f}ms")
 
     prompt_embeds_npy = text_encoder_onnx_out
     return prompt_embeds_npy
@@ -104,35 +98,43 @@ if __name__ == '__main__':
     print(f"time_input: {time_input}")
     print(f"save_dir: {save_dir}")
 
+    tokenizer = CLIPTokenizer.from_pretrained(tokenizer_dir)
+
+    text_encoder = axengine.InferenceSession(
+        os.path.join(
+            text_encoder_dir,
+            "sd15_text_encoder_sim.axmodel"
+        ),
+    )
     timesteps = np.array([999, 759, 499, 259]).astype(np.int64)
-    
+
     # text encoder
     start = time.time()    
     # prompt = "Self-portrait oil painting, a beautiful cyborg with golden hair, 8k"
-    prompt_embeds_npy = get_embeds(prompt, tokenizer_dir, text_encoder_dir)
-    print(f"text encoder take {(1000 * (time.time() - start)):.1f}ms")
-    
+    prompt_embeds_npy = get_embeds(prompt, tokenizer, text_encoder)
+    print(f"get_embeds take {(1000 * (time.time() - start)):.1f}ms")
+
     prompt_name = prompt.replace(" ", "_")
     latents_shape = [1, 4, 64, 64]
     latent = torch.randn(latents_shape, generator=None, device="cpu", dtype=torch.float32,
                          layout=torch.strided).detach().numpy()
-    
+
     alphas_cumprod, final_alphas_cumprod, self_timesteps = get_alphas_cumprod()
-    
+
     # load unet model and vae model
     start = time.time()    
     unet_session_main = axengine.InferenceSession(unet_model)
     vae_decoder = axengine.InferenceSession(vae_decoder_model)
     print(f"load models take {(1000 * (time.time() - start)):.1f}ms")
-    
+
     # load time input file
     time_input = np.load(time_input)
-    
+
     # unet inference loop
     unet_loop_start = time.time()    
     for i, timestep in enumerate(timesteps):
         # print(i, timestep)
-        
+
         unet_start = time.time()
         noise_pred = unet_session_main.run(None, {"sample": latent.astype(np.float32), \
                                             "/down_blocks.0/resnets.0/act_1/Mul_output_0": np.expand_dims(time_input[i], axis=0), \

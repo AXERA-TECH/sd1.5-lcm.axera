@@ -55,8 +55,7 @@ def _maybe_convert_prompt(prompt: str, tokenizer: "PreTrainedTokenizer"):  # noq
     return prompt
 
 
-def get_embeds(prompt = "Portrait of a pretty girl", tokenizer_dir = "./models/tokenizer", text_encoder_dir = "./models/text_encoder"):
-    tokenizer = CLIPTokenizer.from_pretrained(tokenizer_dir)
+def get_embeds(prompt, tokenizer, text_encoder):
 
     text_inputs = tokenizer(
         prompt,
@@ -66,14 +65,9 @@ def get_embeds(prompt = "Portrait of a pretty girl", tokenizer_dir = "./models/t
         return_tensors="pt",
     )
     text_input_ids = text_inputs.input_ids
-
-    text_encoder = axengine.InferenceSession(
-        os.path.join(
-            text_encoder_dir,
-            "sd15_text_encoder_sim.axmodel"
-        ),
-    )
+    start = time.time()
     text_encoder_onnx_out = text_encoder.run(None, {"input_ids": text_input_ids.to("cpu").numpy().astype(np.int32)})[0]
+    print(f"text encoder axmodel take {(1000 * (time.time() - start)):.1f}ms")
 
     prompt_embeds_npy = text_encoder_onnx_out
     return prompt_embeds_npy
@@ -109,6 +103,15 @@ if __name__ == '__main__':
     print(f"time_input: {time_input}")
     print(f"save_dir: {save_dir}")
 
+    tokenizer = CLIPTokenizer.from_pretrained(tokenizer_dir)
+
+    text_encoder = axengine.InferenceSession(
+        os.path.join(
+            text_encoder_dir,
+            "sd15_text_encoder_sim.axmodel"
+        ),
+    )
+
     # 加载模型（只加载一次）
     start = time.time()
     unet_session_main = axengine.InferenceSession(unet_model)
@@ -125,8 +128,8 @@ if __name__ == '__main__':
 
         # Text Encoder
         start = time.time()
-        prompt_embeds_npy = get_embeds(prompt, tokenizer_dir, text_encoder_dir)
-        print(f"text encoder take {(1000 * (time.time() - start)):.1f}ms")
+        prompt_embeds_npy = get_embeds(prompt, tokenizer, text_encoder)
+        print(f"get_embeds take {(1000 * (time.time() - start)):.1f}ms")
 
         # 初始化 Latent
         latents_shape = [1, 4, 64, 64]
@@ -144,7 +147,7 @@ if __name__ == '__main__':
         for i, timestep in enumerate(timesteps):
             unet_start = time.time()
             noise_pred = unet_session_main.run(None, {
-                "sample": latent,
+                "sample": latent.astype(np.float32),
                 "/down_blocks.0/resnets.0/act_1/Mul_output_0": np.expand_dims(time_input_data[i], axis=0),
                 "encoder_hidden_states": prompt_embeds_npy
             })[0]
@@ -184,7 +187,7 @@ if __name__ == '__main__':
         # VAE Inference
         vae_start = time.time()
         latent = latent / 0.18215
-        image = vae_decoder.run(None, {"x": latent})[0]
+        image = vae_decoder.run(None, {"x": latent.astype(np.float32)})[0]
         print(f"vae inference take {(1000 * (time.time() - vae_start)):.1f}ms")
 
         # 保存结果

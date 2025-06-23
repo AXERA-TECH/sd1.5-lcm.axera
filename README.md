@@ -88,7 +88,8 @@ save_dir: ./txt2img_output_axe.png
 [INFO] SOC Name: AX650N
 [INFO] VNPU type: VNPUType.DISABLED
 [INFO] Compiler version: 3.4 9215b7e5
-text encoder take 3067.7ms
+text encoder axmodel take 9.8ms
+get_embeds take 11.5ms
 [INFO] Using provider: AXCLRTExecutionProvider
 [INFO] SOC Name: AX650N
 [INFO] VNPU type: VNPUType.DISABLED
@@ -97,14 +98,14 @@ text encoder take 3067.7ms
 [INFO] SOC Name: AX650N
 [INFO] VNPU type: VNPUType.DISABLED
 [INFO] Compiler version: 3.3 972f38ca
-load models take 15327.1ms
-unet once take 436.2ms
+load models take 15280.1ms
+unet once take 436.0ms
+unet once take 437.8ms
 unet once take 437.5ms
-unet once take 437.6ms
-unet once take 437.6ms
-unet loop take 1753.2ms
-vae inference take 926.9ms
-save image take 125.6ms
+unet once take 437.8ms
+unet loop take 1753.4ms
+vae inference take 930.4ms
+save image take 123.3ms
 ```
 
 **Output Image**
