@@ -61,6 +61,87 @@ python3 run_txt2img_axe[onnx]_infer.py --prompt "your prompt"
 python3 run_img2img_axe[onnx]_infer.py --prompt "your prompt"
 ```
 
+## 2025.11.27 更新
+
+本次更新提供一个统一的模型执行脚本 `launcher.py`，支持在 `AX620E` 和 `AX650N` 芯片上进行文生图 (txt2img) 和图生图 (img2img) 推理任务.
+
+### 特性
+
+- **多平台支持**: 兼容 AX620E 和 AX650N 芯片
+- **双模式推理**: 支持文生图和图生图两种生成模式
+- **多后端支持**: 支持 AXE 和 ONNX 两种推理后端
+- **灵活配置**: ONNX 可自定义图像尺寸、AXMODEL 支持 512 (AX650N) 和 256 (AX620E) 两种尺寸、支持配置随机种子等参数
+- **高性能**: 针对边缘计算设备优化的推理性能
+
+### 环境要求
+
+- Python 3.9+
+- 支持的硬件平台:
+  - AX620E
+  - AX650N
+
+### 模型准备
+
+请确保模型文件已放置在正确的目录中:
+- 默认模型目录: `./models`
+- AX620E 专用模型目录: `ax620e_models/`
+- 建议直接从 HuggingFace 上下载: [点击访问连接](https://huggingface.co/AXERA-TECH/lcm-lora-sdv1-5/tree/main/)
+
+### 基本用法
+
+#### AX620E 平台使用示例
+
+**文生图任务（256x256 分辨率）**:
+
+>生图总耗时(4 steps): text_encoder 48.7ms + unet 1483.9ms + decoder 739.4ms 约为 2.2s.
+
+```bash
+python3 launcher.py --isize 256 --model_dir ax620e_models/ -o "ax620e_txt2img_axe.png" --prompt "Self-portrait oil painting, a beautiful cyborg with golden hair, 8k"
+```
+
+**图生图任务**:
+
+>生图总耗时(2 steps): text_encoder 48.8ms + vae_encoder 359.1ms + unet 744.8ms + decoder 739.1ms 约为 1.9s.
+
+```bash
+python3 launcher.py --init_image ax620e_models/img2img-init.png --isize 256 --model_dir ax620e_models/ --seed 1 --prompt "Astronauts in a jungle, cold color palette, muted colors, detailed, 8k" -o "ax620e_img2img_axe.png"
+```
+
+#### AX650N 平台使用示例
+
+**文生图任务（默认 512x512 分辨率）**:
+
+```bash
+python3 launcher.py -o "ax650n_txt2img_axe.png" --prompt "Self-portrait oil painting, a beautiful cyborg with golden hair, 8k"
+```
+
+**图生图任务**:
+
+```bash
+python3 launcher.py --init_image models/img2img-init.png --prompt "Astronauts in a jungle, cold color palette, muted colors, detailed, 8k" -o "ax650n_img2img_axe.png"
+```
+
+### 参数说明
+
+| 参数 | 类型 | 默认值 | 描述 |
+|------|------|--------|------|
+| `--backend` | choice | `"axe"` | 推理后端（axe 或 onnx）, 默认 axe |
+| `--prompt` | str | 默认提示词 | 输入文本提示词 |
+| `--model_dir` | str | `"./models"` | 包含分词器、文本编码器、UNet、VAE 等模型的目录 |
+| `--time_input` | str | `None` | 可选的时间输入 numpy 文件覆盖 |
+| `--init_image` | str | `None` | 提供初始图像以启用图生图模式 |
+| `--isize` | int | `512` | 输出图像尺寸, 512 or 256, 默认 512 |
+| `-o`, `--save_dir` | str | `"./output.png"` | 生成图像的保存路径 |
+| `--seed` | int | `None` | 随机种子（图生图模式未指定时默认为 0） |
+
+### 使用说明
+
+#### 分辨率限制
+- **AX620E**: 仅支持 256x256 分辨率
+- **AX650N**: 支持 512x512 分辨率
+
+## History
+
 ### 运行
 
 在 `Axera` 开发板上推理时会用到前面编译好的 `axmodel` 模型, 推理脚本为 `run_txt2img_axe_infer.py` 和 `run_img2img_axe_infer.py`. 一个用于文生图任务, 一个用于图生图任务.

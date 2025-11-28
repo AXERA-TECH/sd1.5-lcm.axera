@@ -129,3 +129,31 @@ pulsar2 build --input onnx-models/vae_decoder.onnx  --output_dir axmodels  --out
 pulsar2 build  --input onnx-models/unet.onnx  --output_dir axmodels  --output_name unet.axmodel --config configs/unet_u16.json --quant.precision_analysis 1 --quant.precision_analysis_method EndToEnd
 ```
 
+## 支持 AX620E 编译 (256x256 分辨率)
+
+(1) 编译 `sd15_text_encoder_sim.onnx` 模型
+
+```sh
+pulsar2 build --input onnx-models-256/sd15_text_encoder_sim.onnx --output_dir compiled_text_encoder_ax620e --output_name sd15_text_encoder_sim.axmodel --config ax620e_configs/text_encoder_u16.json --quant.precision_analysis 1 --quant.precision_analysis_method EndToEnd
+```
+
+(2) 编译 `vae_encoder.onnx` 模型
+
+```sh
+pulsar2 build --input onnx-models-256/vae_encoder_slim.onnx --output_dir compiled_vae_encoder_ax620e --output_name vae_encoder.axmodel --config ax620e_configs/vae_encoder_u16.json --quant.precision_analysis 1 --quant.precision_analysis_method EndToEnd
+```
+
+
+(3) 编译 `vae_decoder.onnx` 模型
+
+```sh
+pulsar2 build --input onnx-models-256/vae_decoder.onnx --output_dir compiled_vae_decoder_ax620e --output_name vae_decoder.axmodel --config ax620e_configs/vae_u16_256.json --quant.precision_analysis 1 --quant.precision_analysis_method EndToEnd
+```
+
+(4) 编译 `unet.onnx` 模型
+
+```sh
+pulsar2 build --input onnx-models-256/unet_slim.onnx --output_dir compiled_unet_ax620e --output_name unet.axmodel --config ax620e_configs/unet_u16_256.json --quant.precision_analysis 1 --quant.precision_analysis_method EndToEnd
+```
+
+注意在导出 `ONNX` 模型时配置 `--isize 256x256`, 在准备 `Calibration` 时候配置 `--isize 256`, 在模型编译时指定正确的 `Model` 和 `Config` 路径.

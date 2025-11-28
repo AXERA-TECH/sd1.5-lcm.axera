@@ -81,6 +81,7 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description="unet extract")
     parser.add_argument("--export_onnx_dir", required=True, help="download sd_15 path")
+    parser.add_argument("--isize", default=512, type=int, help="image size, default is 512")
     # parser.add_argument("--time_input", help="download lora weight path", required=True)
 
     args = parser.parse_args()
@@ -91,11 +92,14 @@ if __name__ == '__main__':
                                                      providers=["CPUExecutionProvider"])
     time_input = np.load(args.export_onnx_dir + "/time_input_txt2img.npy")
 
-    os.makedirs("datasets/calib_data_unet", exist_ok=True)
-    os.makedirs("datasets/calib_data_vae", exist_ok=True)
+    unet_calibration_data_path = f"datasets/calib_data_unet_{args.isize}"
+    vae_calibration_data_path = f"datasets/calib_data_vae_{args.isize}"
 
-    calib_tarfile_unet = tarfile.open(f"datasets/calib_data_unet/data.tar", "w")
-    calib_tarfile_vae = tarfile.open(f"datasets/calib_data_vae/data.tar", "w")
+    os.makedirs(unet_calibration_data_path, exist_ok=True)
+    os.makedirs(unet_calibration_data_path, exist_ok=True)
+
+    calib_tarfile_unet = tarfile.open(f"{unet_calibration_data_path}/data.tar", "w")
+    calib_tarfile_vae = tarfile.open(f"{vae_calibration_data_path}/data.tar", "w")
 
     prompts = ['Self-portrait oil painting, a beautiful cyborg with golden hair, 8k',
                'ultra close-up color photo portrait of rainbow owl with deer horns in the woods',
@@ -120,7 +124,7 @@ if __name__ == '__main__':
     for p, prompt in enumerate(prompts):
         prompt_embeds_npy = get_embeds(args.export_onnx_dir, prompt)
         prompt_name = prompt.replace(" ", "_")
-        latent = torch.randn([1, 4, 64, 64], generator=None, device="cpu", dtype=torch.float32, layout=torch.strided).detach().numpy()
+        latent = torch.randn([1, 4, args.isize // 8, args.isize // 8], generator=None, device="cpu", dtype=torch.float32, layout=torch.strided).detach().numpy()
         print(p, prompt)
         for i, timestep in enumerate(timesteps):
             print(i, timestep)
@@ -133,8 +137,8 @@ if __name__ == '__main__':
             calib_data["sample"] = latent
             calib_data["/down_blocks.0/resnets.0/act_1/Mul_output_0"] = np.expand_dims(time_input[i], axis=0)
             calib_data["encoder_hidden_states"] = prompt_embeds_npy
-            np.save(f"datasets/calib_data_unet/data_{p}_{i}.npy", calib_data)
-            calib_tarfile_unet.add(f"datasets/calib_data_unet/data_{p}_{i}.npy")
+            np.save(f"{unet_calibration_data_path}/data_{p}_{i}.npy", calib_data)
+            calib_tarfile_unet.add(f"{unet_calibration_data_path}/data_{p}_{i}.npy")
 
             sample = latent
             model_output = noise_pred
@@ -168,8 +172,8 @@ if __name__ == '__main__':
         latent = latent / 0.18215
         calib_data = {}
         calib_data["x"] = latent
-        np.save(f"datasets/calib_data_vae/data_{p}.npy", calib_data)
-        calib_tarfile_vae.add(f"datasets/calib_data_vae/data_{p}.npy")
+        np.save(f"{vae_calibration_data_path}/data_{p}.npy", calib_data)
+        calib_tarfile_vae.add(f"{vae_calibration_data_path}/data_{p}.npy")
         
     calib_tarfile_unet.close()
     calib_tarfile_vae.close()
