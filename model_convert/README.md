@@ -6,6 +6,8 @@
 
 ```
 git clone https://github.com/AXERA-TECH/sd1.5-lcm.axera.git
+conda create -n sd15 python=3.10
+conda activate sd15
 cd model_convert
 pip install -r requirements.txt
 ```
