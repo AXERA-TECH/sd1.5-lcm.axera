@@ -1,0 +1,46 @@
+{
+  "model_type": "ONNX",
+  "npu_mode": "NPU3",
+  "onnx_opt": {
+    "disable_onnx_optimization": false,
+    "enable_onnxsim": false,
+    "model_check": false,
+    "disable_transformation_check": true,
+    "save_tensors_data": false
+  },
+  "quant": {
+    "input_configs": [
+      {
+        "tensor_name": "DEFAULT",
+        "calibration_dataset": "./datasets/calib_data_vae_1024x768/data.tar",
+        "calibration_size": 4,
+        "calibration_format": "NumpyObject"
+      }
+    ],
+    "calibration_method": "MinMax",
+    "precision_analysis": false,
+    "precision_analysis_method": "EndToEnd",
+    "layer_configs": [
+      {
+        "start_tensor_names": [
+          "DEFAULT"
+        ],
+        "end_tensor_names": [
+          "DEFAULT"
+        ],
+        "data_type": "U16"
+      }
+    ]
+  },
+  "input_processors": [
+    {
+      "tensor_name": "DEFAULT",
+      "tensor_format": "AutoColorSpace",
+      "tensor_layout": "NCHW"
+    }
+  ],
+  "compiler": {
+    "check": 0,
+    "max_dynamic_batch_size": 1
+  }
+}

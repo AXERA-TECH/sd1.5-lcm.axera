@@ -81,19 +81,20 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description="unet extract")
     parser.add_argument("--export_onnx_dir", required=True, help="download sd_15 path")
-    parser.add_argument("--isize", default=512, type=int, help="image size, default is 512")
+    parser.add_argument("--isize", default="512x512", type=str, help="image size, default is 512x512")
     # parser.add_argument("--time_input", help="download lora weight path", required=True)
 
     args = parser.parse_args()
+    height, width = map(int, args.isize.split('x'))
 
     timesteps = np.array([999, 759, 499, 259]).astype(np.int64)
     alphas_cumprod, final_alphas_cumprod, self_timesteps = get_alphas_cumprod()
     unet_session_main = onnxruntime.InferenceSession(args.export_onnx_dir + "/unet.onnx",
                                                      providers=["CPUExecutionProvider"])
     time_input = np.load(args.export_onnx_dir + "/time_input_txt2img.npy")
+    unet_calibration_data_path = f"datasets/calib_data_unet_{height}x{width}"
 
-    unet_calibration_data_path = f"datasets/calib_data_unet_{args.isize}"
-    vae_calibration_data_path = f"datasets/calib_data_vae_{args.isize}"
+    vae_calibration_data_path = f"datasets/calib_data_vae_{height}x{width}"
 
     os.makedirs(unet_calibration_data_path, exist_ok=True)
     os.makedirs(unet_calibration_data_path, exist_ok=True)
@@ -123,8 +124,8 @@ if __name__ == '__main__':
                'A bald eagle made of chocolate powder, mango, and whipped cream.']
     for p, prompt in enumerate(prompts):
         prompt_embeds_npy = get_embeds(args.export_onnx_dir, prompt)
+        latent = torch.randn([1, 4, height // 8, width // 8], generator=None, device="cpu", dtype=torch.float32, layout=torch.strided).detach().numpy()
         prompt_name = prompt.replace(" ", "_")
-        latent = torch.randn([1, 4, args.isize // 8, args.isize // 8], generator=None, device="cpu", dtype=torch.float32, layout=torch.strided).detach().numpy()
         print(p, prompt)
         for i, timestep in enumerate(timesteps):
             print(i, timestep)

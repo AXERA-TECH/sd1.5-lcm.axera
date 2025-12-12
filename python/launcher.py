@@ -322,7 +322,15 @@ def get_args():
     parser.add_argument("--model_dir", type=str, default="./models", help="Directory containing tokenizer, text encoder, UNet, VAE, time inputs")
     parser.add_argument("--time_input", type=str, default=None, help="Optional override for time input numpy file")
     parser.add_argument("--init_image", type=str, default=None, help="Provide an init image to enable img2img")
-    parser.add_argument("--isize", type=int, default=512, help="Output image size (height = width = isize, must be multiple of 8)")
+    parser.add_argument(
+        "--isize",
+        type=str,
+        default="512",
+        help="Output image size. Accepts a single integer (square) or '<height>x<width>'. Overridden by --height/--width if provided",
+    )
+
+    parser.add_argument("--height", type=int, default=None, help="Output image height (must be multiple of 8)")
+    parser.add_argument("--width", type=int, default=None, help="Output image width (must be multiple of 8)")
     parser.add_argument("-o", "--save_dir", type=str, default="./output.png", help="Path to save the generated image")
     parser.add_argument("--seed", type=int, default=None, help="Random seed (img2img defaults to 0 if unspecified)")
     return parser.parse_args()
@@ -369,14 +377,39 @@ def ensure_multiple_of_eight(size: int) -> int:
     return size
 
 
-def compute_latent_shape(size: int, batch_size: int = 1) -> Tuple[int, int, int, int]:
-    size = ensure_multiple_of_eight(size)
-    return batch_size, 4, size // 8, size // 8
+def parse_isize(isize: Union[int, str]) -> Tuple[int, int]:
+    if isinstance(isize, str):
+        token = isize.lower().replace(" ", "")
+        if "x" in token:
+            parts = token.split("x")
+            if len(parts) != 2 or not all(p.isdigit() for p in parts):
+                raise ValueError("isize format should be <height>x<width> or a single integer")
+            return int(parts[0]), int(parts[1])
+        if token.isdigit():
+            val = int(token)
+            return val, val
+        raise ValueError("isize format should be <height>x<width> or a single integer")
+    if isinstance(isize, int):
+        return isize, isize
+    raise ValueError("isize must be int or string")
 
 
-def prepare_init_image(image_path: str, size: int) -> Tuple[Image.Image, np.ndarray]:
+def resolve_dimensions(isize: Union[int, str], height: Optional[int], width: Optional[int]) -> Tuple[int, int]:
+    base_h, base_w = parse_isize(isize)
+    resolved_h = height if height is not None else base_h
+    resolved_w = width if width is not None else base_w
+    return ensure_multiple_of_eight(resolved_h), ensure_multiple_of_eight(resolved_w)
+
+
+def compute_latent_shape(height: int, width: int, batch_size: int = 1) -> Tuple[int, int, int, int]:
+    height = ensure_multiple_of_eight(height)
+    width = ensure_multiple_of_eight(width)
+    return batch_size, 4, height // 8, width // 8
+
+
+def prepare_init_image(image_path: str, height: int, width: int) -> Tuple[Image.Image, np.ndarray]:
     def convert(img: Image.Image) -> Image.Image:
-        return img.resize((size, size)).convert("RGB")
+        return img.resize((width, height)).convert("RGB")
 
     image = load_image(image_path, convert_method=convert)
     image_show = image.copy()
@@ -494,7 +527,7 @@ def get_embeds(
     input_ids = text_inputs.input_ids.to("cpu").numpy()
     if backend == "axe":
         input_ids = input_ids.astype(np.int32)
-
+    # print(f"input_ids is \n{input_ids}")
     text_encoder = create_session(text_encoder_path, backend)
     running_start = time.time()
     prompt_embeds_npy = text_encoder.run(None, {"input_ids": input_ids})[0]
@@ -534,7 +567,7 @@ def main():
     if is_img2img:
         init_image_path = resolve_with_base(args.init_image, model_dir)
 
-    size = ensure_multiple_of_eight(args.isize)
+    height, width = resolve_dimensions(args.isize, args.height, args.width)
     print(f"backend: {backend}")
     print(f"prompt: {prompt}")
     print(f"model_dir: {model_dir}")
@@ -547,7 +580,7 @@ def main():
         print(f"vae_encoder_model: {vae_encoder_model}")
         print(f"init image: {init_image_path}")
     print(f"time_input: {time_input_path}")
-    print(f"image_size: {size}x{size}")
+    print(f"image_size: {height}x{width}")
     print(f"save_dir: {args.save_dir}")
 
     device = torch.device("cpu")
@@ -573,7 +606,7 @@ def main():
     time_input = np.load(time_input_path)
 
     if is_img2img:
-        init_image_show, init_image_np = prepare_init_image(init_image_path, size)
+        init_image_show, init_image_np = prepare_init_image(init_image_path, height, width)
 
         vae_start = time.time()
         vae_encoder_inp_name = vae_encoder_session.get_inputs()[0].name
@@ -596,7 +629,7 @@ def main():
         self_timesteps = IMG2IMG_SELF_TIMESTEPS
         step_index = IMG2IMG_STEP_INDEX
     else:
-        batch, channels, latent_h, latent_w = compute_latent_shape(size)
+        batch, channels, latent_h, latent_w = compute_latent_shape(height, width)
         if generator is None:
             latents = torch.randn((batch, channels, latent_h, latent_w), device=device, dtype=torch.float32)
         else:
