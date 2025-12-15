@@ -65,12 +65,12 @@ python3 run_img2img_axe[onnx]_infer.py --prompt "your prompt"
 
 本次更新, `AX650N` 支持生成 `1024x768` 分辨率的图像, 相关模型可以从 [HuggingFace](https://huggingface.co/AXERA-TECH/lcm-lora-sdv1-5/tree/main/models_1024x768) 上下载.
 
-![1024x768_sample_1](assets/txt2img_1024x768_sample_1.png)
+![1024x768_sample_1](assets/txt2img_1024x768_sample_3.png)
 
 复现命令:
 
 ```sh
-python3 launcher.py --model_dir models_1024x768/ --isize 1024x768 --prompt "(masterpiece, best quality, ultra detailed, 8k, CG unity wallpaper),1 young beautiful girl, full body, official art, extremely detailed, highly detailed, 1 girl, aqua eyes, light smile, grey hair, hair flower,bracelet, choker, ribbon, JK, looking at viewer, on the beach, in summer," --seed 99
+python3 launcher.py --model_dir models_1024x768/ --isize 1024x768 --prompt "(masterpiece, best quality, ultra detailed, 8k, CG unity wallpaper),1 young beautiful girl, full body, official art, extremely detailed, highly detailed, 1 girl, aqua eyes, light smile, grey hair, hair flower,bracelet, choker, ribbon, JK, looking at viewer, on the beach, in summer," --seed 299
 ```
 
 ![1024x768_sample_2](assets/txt2img_1024x768_sample_2.png)
